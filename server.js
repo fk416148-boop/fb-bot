@@ -3,9 +3,10 @@ const axios = require("axios");
 const app = express();
 app.use(express.json());
 
-const PAGE_ACCESS_TOKEN = "YAHAN_APNA_PAGE_TOKEN_LIKHO";
-const VERIFY_TOKEN = "mera_secret_token_123";
-const ANTHROPIC_KEY = "YAHAN_CLAUDE_KEY_LIKHO";
+const TOKEN = process.env.WHATSAPP_TOKEN;
+const PHONE_ID = process.env.PHONE_NUMBER_ID;
+const VERIFY_TOKEN = "drcheezy123";
+const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 
 app.get("/webhook", (req, res) => {
   if (req.query["hub.verify_token"] === VERIFY_TOKEN) {
@@ -16,42 +17,44 @@ app.get("/webhook", (req, res) => {
 });
 
 app.post("/webhook", async (req, res) => {
-  const body = req.body;
-  if (body.object !== "page") return res.sendStatus(404);
-  for (const entry of body.entry) {
-    for (const event of entry.messaging) {
-      if (event.message && !event.message.is_echo) {
-        const reply = await getAIReply(event.message.text);
-        await sendMessage(event.sender.id, reply);
+  const msg = req.body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+  if (!msg) return res.sendStatus(200);
+  const from = msg.from;
+  const text = msg.text?.body || "";
+
+  try {
+    const ai = await axios.post("https://api.anthropic.com/v1/messages", {
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 500,
+      messages: [{ role: "user", content: text }],
+      system: `آپ Dr Cheezy restaurant کے AI assistant ہیں۔ 
+Customer کے ساتھ اردو میں بات کریں۔
+Menu: Cheezy Burger 350rs, Double Cheezy 500rs, Fries 150rs, Cold Drink 100rs.
+آرڈر لیں، پتہ پوچھیں، اور confirm کریں۔
+ہمیشہ friendly رہیں۔ 🧀`
+    }, {
+      headers: {
+        "x-api-key": ANTHROPIC_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json"
       }
-    }
+    });
+
+    const reply = ai.data.content[0].text;
+
+    await axios.post(`https://graph.facebook.com/v18.0/${PHONE_ID}/messages`, {
+      messaging_product: "whatsapp",
+      to: from,
+      text: { body: reply }
+    }, {
+      headers: { Authorization: `Bearer ${TOKEN}` }
+    });
+
+  } catch (e) {
+    console.error(e.message);
   }
-  res.status(200).send("OK");
+
+  res.sendStatus(200);
 });
 
-async function getAIReply(msg) {
-  try {
-    const res = await axios.post(
-      "https://api.anthropic.com/v1/messages",
-      {
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 300,
-        system: "Tu ek Facebook Marketplace seller ka assistant hai. Customer ke sawalon ka jawab Roman Urdu mein do. 2-3 lines, friendly. Shukriya 🙏 se khatam karo.",
-        messages: [{ role: "user", content: msg }]
-      },
-      { headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "Content-Type": "application/json" } }
-    );
-    return res.data.content[0].text;
-  } catch (e) {
-    return "Shukriya! Hum jald jawab denge 🙏";
-  }
-}
-
-async function sendMessage(id, text) {
-  await axios.post(
-    `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
-    { recipient: { id }, message: { text } }
-  );
-}
-
-app.listen(3000, () => console.log("Bot chal raha hai!"));
+app.listen(3000, () => console.log("Dr Cheezy Bot running!"));
